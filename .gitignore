@@ -1,0 +1,4 @@
+src/data/
+*.parquet
+src/Inclusive_Growth_Score_Data_Export_*.csv
+src/Inclusive_Growth_Score_Data_Export_*.xlsx
