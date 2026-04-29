@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Shelby County 3-group map with Black population % overlay.
+Shelby County: selected low-growth community and Black population share by tract.
 
-Groups:
-  1) Selected low-growth community  (96 tracts from GeoJSON)
-  2) Selected high-growth comparator (highest-IGS contiguous Shelby cluster outside low-growth)
-  3) Rest of Shelby County
+High-growth comparator is identified using the same methodology as final_model2.ipynb:
+  - Spatially-constrained Ward agglomerative clustering (N=6 communities)
+  - Connectivity matrix built from tract adjacency (touching polygons)
+  - Features: ACS economic indicators (income, poverty, unemployment, LFPR)
+    as proxies for IGS Economy pillar
+  - Best non-low-growth community = highest median income / lowest poverty
 
-Overlay: % Black or African American alone (ACS 2022 5-year estimates)
-
-Run:  python shelby_map_black_pct.py
+Run:    python shelby_map_black_pct.py
 Output: data/processed/presentation_ready/shelby_map_black_pct.png
 """
 
@@ -20,266 +20,347 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.patheffects as pe
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+import matplotlib.lines as mlines
+from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+from scipy.sparse import coo_matrix
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-_dir  = Path(os.path.dirname(os.path.abspath(__file__)))
-DATA  = _dir / "data"
-PROC  = DATA / "processed"
-PRES  = PROC / "presentation_ready"
-RAW   = DATA / "raw"
-
-SHP_PATH      = RAW  / "tl_2024_state_tracts/tl_2024_47_tract/tl_2024_47_tract.shp"
-LOW_GRW_PATH  = PRES / "selected_low_growth_96_tracts.geojson"
-OUT_PATH      = PRES / "shelby_map_black_pct.png"
+_dir         = Path(os.path.dirname(os.path.abspath(__file__)))
+SHP_PATH     = _dir / "data/raw/tl_2024_state_tracts/tl_2024_47_tract/tl_2024_47_tract.shp"
+LOW_GRW_PATH = _dir / "data/processed/presentation_ready/selected_low_growth_96_tracts.geojson"
+OUT_PATH     = _dir / "data/processed/presentation_ready/shelby_map_black_pct.png"
+CLUSTER_CACHE = _dir / "data/processed/shelby_full_tract_cluster_map.geojson"
 
 
-# ── 1. Load geometries ────────────────────────────────────────────────────────
-print("Loading geometries...")
-tn_tracts = gpd.read_file(SHP_PATH)
+# ─────────────────────────────────────────────────────────────────────────────
+# ACS data fetch
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Normalize GEOID to 11-digit string
-tn_tracts["geoid"] = (
-    tn_tracts["STATEFP"].str.zfill(2)
-    + tn_tracts["COUNTYFP"].str.zfill(3)
-    + tn_tracts["TRACTCE"].str.zfill(6)
-)
+def fetch_acs(year: int = 2022) -> pd.DataFrame:
+    """
+    Fetch ACS 5-year estimates for all Shelby County tracts.
+    Variables: race, income, poverty, unemployment.
+    """
+    print(f"  Fetching ACS {year} 5-year estimates...")
+    vars_needed = ",".join([
+        "B02001_001E",   # total population
+        "B02001_003E",   # Black or African American alone
+        "B19013_001E",   # median household income
+        "B17001_001E",   # population for poverty determination
+        "B17001_002E",   # below poverty level
+        "B23025_003E",   # civilian labor force
+        "B23025_005E",   # unemployed
+    ])
+    r = requests.get(
+        f"https://api.census.gov/data/{year}/acs/acs5",
+        params={"get": vars_needed, "for": "tract:*", "in": "state:47 county:157"},
+        timeout=60,
+    )
+    r.raise_for_status()
+    rows = r.json()
+    df   = pd.DataFrame(rows[1:], columns=rows[0])
 
-shelby = tn_tracts[
-    (tn_tracts["STATEFP"] == "47") & (tn_tracts["COUNTYFP"] == "157")
-].copy()
-shelby = shelby.to_crs(3857)
-print(f"  Shelby County tracts: {len(shelby)}")
+    df["geoid"]     = df["state"].str.zfill(2) + df["county"].str.zfill(3) + df["tract"].str.zfill(6)
+    df["pop_total"] = pd.to_numeric(df["B02001_001E"], errors="coerce").clip(lower=0)
+    df["pop_black"] = pd.to_numeric(df["B02001_003E"], errors="coerce").clip(lower=0)
+    df["med_income"]= pd.to_numeric(df["B19013_001E"], errors="coerce")
+    df["pov_denom"] = pd.to_numeric(df["B17001_001E"], errors="coerce").clip(lower=0)
+    df["pov_below"] = pd.to_numeric(df["B17001_002E"], errors="coerce").clip(lower=0)
+    df["clf"]       = pd.to_numeric(df["B23025_003E"], errors="coerce").clip(lower=0)
+    df["unemployed"]= pd.to_numeric(df["B23025_005E"], errors="coerce").clip(lower=0)
 
-low_growth_gdf = gpd.read_file(LOW_GRW_PATH).copy()
-low_growth_gdf["geoid"] = low_growth_gdf["geoid"].astype(str).str.zfill(11)
-low_growth_geoids = set(low_growth_gdf["geoid"].dropna())
-print(f"  Low-growth tracts:    {len(low_growth_geoids)}")
+    df["pct_black"]  = np.where(df["pop_total"] > 0,
+                                (df["pop_black"] / df["pop_total"] * 100).clip(0, 100), np.nan)
+    df["poverty_rate"]= np.where(df["pov_denom"] > 0,
+                                 (df["pov_below"] / df["pov_denom"]).clip(0, 1), np.nan)
+    df["unemp_rate"]  = np.where(df["clf"] > 0,
+                                 (df["unemployed"] / df["clf"]).clip(0, 1), np.nan)
 
-
-# ── 2. Fetch ACS 2022 race + income for all Shelby tracts ────────────────────
-print("Fetching ACS 2022 data from Census API...")
-ACS_VARS = "B02001_001E,B02001_003E,B19013_001E"   # total pop, Black alone, median HH income
-ACS_URL  = "https://api.census.gov/data/2022/acs/acs5"
-params = {
-    "get":  ACS_VARS,
-    "for":  "tract:*",
-    "in":   "state:47 county:157",
-}
-
-resp = requests.get(ACS_URL, params=params, timeout=60)
-resp.raise_for_status()
-
-data_rows = resp.json()
-cols = data_rows[0]
-acs = pd.DataFrame(data_rows[1:], columns=cols)
-acs["geoid"] = acs["state"].str.zfill(2) + acs["county"].str.zfill(3) + acs["tract"].str.zfill(6)
-
-acs["pop_total"]    = pd.to_numeric(acs["B02001_001E"], errors="coerce")
-acs["pop_black"]    = pd.to_numeric(acs["B02001_003E"], errors="coerce")
-acs["med_income"]   = pd.to_numeric(acs["B19013_001E"], errors="coerce")
-
-# Black share (0–100)
-acs["pct_black"] = np.where(
-    acs["pop_total"] > 0,
-    (acs["pop_black"] / acs["pop_total"] * 100).clip(0, 100),
-    np.nan,
-)
-
-print(f"  ACS tracts returned: {len(acs)}")
-print(f"  Black % range: {acs['pct_black'].min():.1f}%–{acs['pct_black'].max():.1f}%")
+    print(f"  {len(df)} tracts fetched. Black % range: "
+          f"{df['pct_black'].min():.1f}%-{df['pct_black'].max():.1f}%")
+    return df[["geoid", "pop_total", "pop_black", "pct_black",
+               "med_income", "poverty_rate", "unemp_rate"]]
 
 
-# ── 3. Classify high-growth comparator ───────────────────────────────────────
-# The notebook's clustering algorithm identified contiguous, high-IGS tracts in
-# eastern Shelby County as the comparator. We approximate this by taking the
-# non-low-growth tracts in the top income quartile, then picking the spatially
-# contiguous group that maximises average income.
+# ─────────────────────────────────────────────────────────────────────────────
+# Spatially-constrained Ward clustering (mirrors final_model2.ipynb Cell 8C)
+# ─────────────────────────────────────────────────────────────────────────────
 
-non_low = acs[~acs["geoid"].isin(low_growth_geoids)].copy()
-income_75th = non_low["med_income"].quantile(0.72)   # ~top 28% matches map visually
-print(f"  Income threshold for high-growth: ${income_75th:,.0f}")
+def build_shelby_communities(shelby_gdf: gpd.GeoDataFrame,
+                              acs: pd.DataFrame,
+                              n_communities: int = 6) -> gpd.GeoDataFrame:
+    """
+    Partition all Shelby tracts into N spatially contiguous communities using
+    Ward agglomerative clustering with an adjacency connectivity constraint.
 
-high_growth_candidates = set(
-    non_low.loc[non_low["med_income"] >= income_75th, "geoid"]
-)
+    Mirrors the notebook's Cell 8C methodology:
+      - Features: economic indicators (income, poverty, unemployment)
+        as proxies for IGS Economy pillar, signs flipped so higher = more vulnerable
+      - Connectivity: tract adjacency matrix built from shapefile touches
+      - Linkage: ward, metric: euclidean
+    """
+    print(f"  Building spatially-constrained Ward clustering ({n_communities} communities)...")
 
-# Keep only the largest spatially contiguous group among candidates
-candidate_geo = shelby[shelby["geoid"].isin(high_growth_candidates)].copy()
+    df = shelby_gdf[["geoid", "geometry"]].merge(acs, on="geoid", how="left").copy()
 
-# Build adjacency list from touches
-left  = candidate_geo[["geoid", "geometry"]].rename(columns={"geoid": "g1"})
-right = candidate_geo[["geoid", "geometry"]].rename(columns={"geoid": "g2"})
-adj   = gpd.sjoin(left, right, how="inner", predicate="touches")
-adj   = adj[adj["g1"] != adj["g2"]][["g1", "g2"]].drop_duplicates()
+    # Feature matrix — flip sign so all features encode vulnerability (higher = worse)
+    features = pd.DataFrame({
+        "neg_income":   -pd.to_numeric(df["med_income"],    errors="coerce"),
+        "poverty_rate":  pd.to_numeric(df["poverty_rate"],   errors="coerce"),
+        "unemp_rate":    pd.to_numeric(df["unemp_rate"],     errors="coerce"),
+    }, index=df.index)
 
-# BFS to find connected components
-from collections import deque, defaultdict
+    X = SimpleImputer(strategy="median").fit_transform(features)
+    X = StandardScaler().fit_transform(X)
 
-graph = defaultdict(set)
-for _, row in adj.iterrows():
-    graph[row["g1"]].add(row["g2"])
-    graph[row["g2"]].add(row["g1"])
+    # Adjacency matrix for spatial connectivity constraint
+    geoid_list = df["geoid"].tolist()
+    idx_map    = {g: i for i, g in enumerate(geoid_list)}
 
-all_nodes = set(high_growth_candidates)
-visited   = set()
-components = []
-for node in all_nodes:
-    if node in visited:
-        continue
-    comp = set()
-    q = deque([node])
-    while q:
-        n = q.popleft()
-        if n in visited:
+    left  = shelby_gdf[["geoid", "geometry"]].rename(columns={"geoid": "g1"})
+    right = shelby_gdf[["geoid", "geometry"]].rename(columns={"geoid": "g2"})
+    adj   = gpd.sjoin(left, right, how="inner", predicate="touches")
+    adj   = adj[adj["g1"] != adj["g2"]][["g1", "g2"]].drop_duplicates()
+
+    valid = adj["g1"].isin(idx_map) & adj["g2"].isin(idx_map)
+    adj   = adj[valid]
+    r_idx = adj["g1"].map(idx_map).to_numpy()
+    c_idx = adj["g2"].map(idx_map).to_numpy()
+
+    connectivity = coo_matrix(
+        (np.ones(len(r_idx), dtype=int), (r_idx, c_idx)),
+        shape=(len(geoid_list), len(geoid_list)),
+    )
+    connectivity = connectivity.maximum(connectivity.T)
+
+    # Ward clustering with spatial constraint
+    model  = AgglomerativeClustering(
+        n_clusters=n_communities,
+        linkage="ward",
+        connectivity=connectivity,
+    )
+    labels = model.fit_predict(X)
+
+    df["shelby_community_id"] = [f"Shelby County community {int(x) + 1}" for x in labels]
+
+    counts = df["shelby_community_id"].value_counts()
+    print("  Community tract counts:")
+    for name, cnt in counts.items():
+        print(f"    {name}: {cnt} tracts")
+
+    return df[["geoid", "geometry", "shelby_community_id"]].copy()
+
+
+def select_high_growth_community(community_gdf: gpd.GeoDataFrame,
+                                  acs: pd.DataFrame,
+                                  low_growth_geoids: set) -> set:
+    """
+    Pick the best non-overlapping community as the high-growth comparator.
+    Criteria (mirrors Cell 8F/8G): highest recovery economics (income, low poverty),
+    no more than 10% overlap with the low-growth selected community.
+    """
+    best_score  = -np.inf
+    best_geoids = set()
+
+    for community_id, grp in community_gdf.groupby("shelby_community_id"):
+        geoids  = set(grp["geoid"].dropna())
+        overlap = len(geoids & low_growth_geoids) / max(len(geoids), 1)
+        if overlap > 0.10:
+            continue   # skip communities that overlap with low-growth area
+
+        sub = acs[acs["geoid"].isin(geoids)]
+        income  = sub["med_income"].median()
+        poverty = sub["poverty_rate"].median()
+
+        # Composite: high income + low poverty (same direction as IGS Economy pillar)
+        score = income / 1000 - poverty * 100
+        if score > best_score:
+            best_score  = score
+            best_geoids = geoids
+            best_id     = community_id
+
+    print(f"  High-growth comparator selected: {best_id} ({len(best_geoids)} tracts)")
+    return best_geoids
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Top-level data loader
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_and_classify() -> gpd.GeoDataFrame:
+    print("Loading Shelby County geometry...")
+    tn = gpd.read_file(SHP_PATH)
+    tn["geoid"] = (tn["STATEFP"].str.zfill(2)
+                   + tn["COUNTYFP"].str.zfill(3)
+                   + tn["TRACTCE"].str.zfill(6))
+    shelby = tn[(tn["STATEFP"] == "47") & (tn["COUNTYFP"] == "157")].copy()
+    shelby = shelby.to_crs(3857)
+    print(f"  {len(shelby)} Shelby County tracts")
+
+    lg_gdf = gpd.read_file(LOW_GRW_PATH).copy()
+    lg_gdf["geoid"]     = lg_gdf["geoid"].astype(str).str.zfill(11)
+    low_growth_geoids   = set(lg_gdf["geoid"].dropna())
+    print(f"  Low-growth tracts: {len(low_growth_geoids)}")
+
+    acs = fetch_acs(2022)
+
+    # Use cached cluster map if available, else recompute
+    if CLUSTER_CACHE.exists():
+        print(f"  Loading cached community map: {CLUSTER_CACHE}")
+        community_gdf = gpd.read_file(CLUSTER_CACHE).copy()
+        community_gdf["geoid"] = community_gdf["geoid"].astype(str).str.zfill(11)
+        # Reproject to match shelby CRS
+        community_gdf = community_gdf.set_crs(4326, allow_override=True).to_crs(3857)
+    else:
+        community_gdf = build_shelby_communities(shelby, acs, n_communities=6)
+        # Save for reuse
+        save_gdf = community_gdf.copy().to_crs(4326)
+        save_gdf.to_file(CLUSTER_CACHE, driver="GeoJSON")
+        print(f"  Saved community map: {CLUSTER_CACHE}")
+
+    high_growth_geoids = select_high_growth_community(community_gdf, acs, low_growth_geoids)
+
+    def assign_group(g):
+        if g in low_growth_geoids:  return "low_growth"
+        if g in high_growth_geoids: return "high_growth"
+        return "rest"
+
+    shelby["group"] = shelby["geoid"].map(assign_group)
+    shelby = shelby.merge(
+        acs[["geoid", "pct_black", "pop_black", "pop_total"]],
+        on="geoid", how="left",
+    )
+    return shelby
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Map
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_black_population_choropleth(gdf: gpd.GeoDataFrame, output_path=None):
+    """
+    Choropleth of % Black by tract with community group outlines.
+    Returns fig, ax. Saves to output_path if provided.
+    """
+    # Per-group summary stats
+    stats = {}
+    for grp in ["low_growth", "high_growth", "rest"]:
+        sub   = gdf[gdf["group"] == grp]
+        pop_b = pd.to_numeric(sub["pop_black"], errors="coerce").fillna(0)
+        pct   = pd.to_numeric(sub["pct_black"],  errors="coerce")
+        stats[grp] = {
+            "n":           len(sub),
+            "total_black": int(pop_b.sum()),
+            "avg_pct":     float(pct.mean()),
+        }
+
+    fig, ax = plt.subplots(figsize=(15, 13))
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    # Choropleth: % Black, Blues scale
+    norm = Normalize(vmin=0, vmax=100)
+    gdf.plot(
+        ax=ax, column="pct_black", cmap="Blues", norm=norm,
+        edgecolor="#CCCCCC", linewidth=0.35,
+        missing_kwds={"color": "#EEEEEE", "edgecolor": "#CCCCCC", "linewidth": 0.35},
+        zorder=2,
+    )
+
+    # Community outlines only — bold, no fill
+    OUTLINE = {
+        "low_growth":  {"color": "#E8500A", "linewidth": 5.0},
+        "high_growth": {"color": "#2CA02C", "linewidth": 5.0},
+    }
+    for grp, style in OUTLINE.items():
+        dissolved = gdf[gdf["group"] == grp].dissolve()
+        if dissolved.empty:
             continue
-        visited.add(n)
-        comp.add(n)
-        q.extend(graph[n] - visited)
-    components.append(comp)
+        dissolved.boundary.plot(
+            ax=ax, color=style["color"], linewidth=style["linewidth"],
+            capstyle="round", joinstyle="round", zorder=5,
+        )
 
-# Pick the component with the highest average income
-def avg_income(comp):
-    vals = acs.loc[acs["geoid"].isin(comp), "med_income"].dropna()
-    return vals.mean() if len(vals) > 0 else 0
+    # Colorbar
+    sm = ScalarMappable(cmap="Blues", norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.026, pad=0.012, shrink=0.72, aspect=22)
+    cbar.set_label("% Black residents", fontsize=13, labelpad=10)
+    cbar.set_ticks([0, 20, 40, 60, 80, 100])
+    cbar.set_ticklabels(["0%", "20%", "40%", "60%", "80%", "100%"])
+    cbar.ax.tick_params(labelsize=11)
 
-best_component = max(components, key=lambda c: (len(c), avg_income(c)))
-high_growth_geoids = best_component
-print(f"  High-growth comparator tracts: {len(high_growth_geoids)}")
-
-
-# ── 4. Assign groups ──────────────────────────────────────────────────────────
-def assign_group(g):
-    if g in low_growth_geoids:
-        return "low_growth"
-    elif g in high_growth_geoids:
-        return "high_growth"
-    return "rest"
-
-shelby["group"] = shelby["geoid"].map(assign_group)
-shelby = shelby.merge(acs[["geoid", "pct_black"]], on="geoid", how="left")
-
-print("\nGroup breakdown:")
-print(shelby["group"].value_counts().to_string())
-print(f"  Missing Black %: {shelby['pct_black'].isna().sum()}")
-
-
-# ── 5. Plot ───────────────────────────────────────────────────────────────────
-print("\nRendering map...")
-fig, ax = plt.subplots(1, 1, figsize=(13, 11))
-fig.patch.set_facecolor("#f8f8f8")
-ax.set_facecolor("#dce9f5")
-
-# -- Continuous fill: Black population %
-cmap = LinearSegmentedColormap.from_list(
-    "black_pct",
-    ["#fef0d9", "#fc8d59", "#b30000"],   # light-yellow → orange → dark-red
-)
-norm = Normalize(vmin=0, vmax=100)
-
-shelby.plot(
-    ax=ax,
-    column="pct_black",
-    cmap=cmap,
-    norm=norm,
-    edgecolor="#bbbbbb",
-    linewidth=0.35,
-    missing_kwds={"color": "#dddddd", "edgecolor": "#bbbbbb", "linewidth": 0.35},
-    zorder=2,
-)
-
-# -- Group boundary outlines (thick, colored)
-GROUP_STYLES = {
-    "low_growth":  {"color": "#e74c3c", "linewidth": 3.2, "linestyle": "-",  "zorder": 4},
-    "high_growth": {"color": "#27ae60", "linewidth": 3.2, "linestyle": "-",  "zorder": 4},
-    "rest":        {"color": "#7f8c8d", "linewidth": 1.4, "linestyle": "--", "zorder": 3},
-}
-
-for grp, style in GROUP_STYLES.items():
-    outline = shelby[shelby["group"] == grp].dissolve()
-    if outline.empty:
-        continue
-    outline.boundary.plot(
-        ax=ax,
-        color=style["color"],
-        linewidth=style["linewidth"],
-        linestyle=style["linestyle"],
-        zorder=style["zorder"],
+    # Legend
+    ax.legend(
+        handles=[
+            mlines.Line2D([], [], color="#E8500A", linewidth=3.5,
+                          label="Selected low-growth community outline"),
+            mlines.Line2D([], [], color="#2CA02C", linewidth=3.5,
+                          label="High-growth comparator outline"),
+        ],
+        title="Community outlines", title_fontsize=12,
+        loc="upper left", fontsize=11,
+        frameon=True, framealpha=0.95, edgecolor="#AAAAAA", handlelength=2.2,
     )
 
-# -- Outer county border
-shelby.dissolve().boundary.plot(ax=ax, color="#2c3e50", linewidth=1.6, zorder=5)
-
-# -- Group labels
-LABEL_CFG = {
-    "low_growth":  ("Low-growth\nselected community",  "#c0392b"),
-    "high_growth": ("High-growth\ncomparator",          "#1e8449"),
-    "rest":        ("Rest of\nShelby County",           "#4a4a4a"),
-}
-
-for grp, (label, color) in LABEL_CFG.items():
-    sub = shelby[shelby["group"] == grp]
-    if sub.empty:
-        continue
-    pt = sub.dissolve().geometry.representative_point().iloc[0]
-    ax.text(
-        pt.x, pt.y, label,
-        ha="center", va="center",
-        fontsize=10.5, fontweight="bold", color="white",
-        bbox=dict(
-            boxstyle="round,pad=0.35",
-            facecolor=color,
-            edgecolor="white",
-            alpha=0.92,
-            linewidth=1.2,
-        ),
-        zorder=6,
-        path_effects=[pe.withStroke(linewidth=2.5, foreground="white")],
+    # Title + subtitle
+    ax.set_title(
+        "Shelby County: selected low-growth community and Black population share by tract",
+        fontsize=18, fontweight="bold", pad=16, loc="left",
+    )
+    fig.text(
+        ax.get_position().x0, 0.905,
+        "Tract shading shows percent Black population using ACS tract averages for 2022-2024.",
+        fontsize=12, color="#555555", fontstyle="italic",
+        transform=fig.transFigure,
     )
 
-# -- Colorbar
-sm = ScalarMappable(cmap=cmap, norm=norm)
-sm.set_array([])
-cbar = fig.colorbar(sm, ax=ax, fraction=0.032, pad=0.02, shrink=0.72)
-cbar.set_label("% Black or African American\n(ACS 2022 5-year estimate)", fontsize=10)
-cbar.set_ticks([0, 25, 50, 75, 100])
-cbar.set_ticklabels(["0%", "25%", "50%", "75%", "100%"])
+    # Summary stats + story note
+    lg, hg, rs = stats["low_growth"], stats["high_growth"], stats["rest"]
+    summary = "\n".join([
+        "Community snapshot (ACS tract averages, 2022-2024)",
+        f"Selected low-growth community: {lg['avg_pct']:.0f}% Black | "
+        f"{lg['total_black']:,} est. Black residents | {lg['n']} tracts",
+        f"Rest of Shelby County: {rs['avg_pct']:.0f}% Black | "
+        f"{rs['total_black']:,} est. Black residents | {rs['n']} tracts",
+        f"High-growth comparator: {hg['avg_pct']:.0f}% Black | "
+        f"{hg['total_black']:,} est. Black residents | {hg['n']} tracts",
+        "",
+        "Story note",
+        (f"The selected low-growth community overlaps with the darker high-Black-share tract "
+         f"corridor: {lg['avg_pct']:.0f}% Black versus {rs['avg_pct']:.0f}% in the rest of "
+         f"Shelby County and {hg['avg_pct']:.0f}% in the high-growth comparator."),
+    ])
+    fig.text(
+        0.03, 0.01, summary,
+        fontsize=10, color="#333333", va="bottom",
+        bbox=dict(boxstyle="round,pad=0.7", facecolor="#F7F7F7",
+                  edgecolor="#BBBBBB", linewidth=0.9),
+    )
 
-# -- Group legend patches
-legend_patches = [
-    mpatches.Patch(facecolor="none", edgecolor="#e74c3c", linewidth=3,
-                   label="Low-growth selected community"),
-    mpatches.Patch(facecolor="none", edgecolor="#27ae60", linewidth=3,
-                   label="High-growth comparator"),
-    mpatches.Patch(facecolor="none", edgecolor="#7f8c8d", linewidth=2,
-                   linestyle="dashed", label="Rest of Shelby County"),
-]
-ax.legend(
-    handles=legend_patches,
-    title="Community group\n(boundary color)",
-    loc="lower left",
-    frameon=True,
-    framealpha=0.92,
-    fontsize=9.5,
-    title_fontsize=10,
-)
+    ax.set_axis_off()
+    plt.subplots_adjust(bottom=0.20, top=0.91, left=0.01, right=0.87)
 
-ax.set_title(
-    "Shelby County: 3-group community map\nwith % Black or African American by tract",
-    fontsize=16,
-    fontweight="bold",
-    pad=14,
-)
-ax.set_axis_off()
-plt.tight_layout(pad=1.2)
+    if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=200, bbox_inches="tight", facecolor="white")
+        print(f"Saved: {output_path}")
 
-PRES.mkdir(parents=True, exist_ok=True)
-fig.savefig(OUT_PATH, dpi=200, bbox_inches="tight")
-print(f"\nSaved: {OUT_PATH}")
-plt.show()
+    return fig, ax
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    gdf = load_and_classify()
+    print(f"\nGroup counts:\n{gdf['group'].value_counts().to_string()}")
+    print(f"Missing pct_black: {gdf['pct_black'].isna().sum()}")
+    print("\nRendering map...")
+    fig, ax = plot_black_population_choropleth(gdf, output_path=OUT_PATH)
+    plt.show()
