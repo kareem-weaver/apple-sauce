@@ -7,7 +7,8 @@ High-growth comparator is identified using the same methodology as final_model2.
   - Connectivity matrix built from tract adjacency (touching polygons)
   - Features: ACS economic indicators (income, poverty, unemployment, LFPR)
     as proxies for IGS Economy pillar
-  - Best non-low-growth community = highest median income / lowest poverty
+  - Best non-low-growth community = highest composite rank across income, poverty,
+    unemployment, and LFPR (mirrors notebook Cells 8F/8G percentile-ranking)
 
 Run:    python shelby_map_black_pct.py
 Output: data/processed/presentation_ready/shelby_map_black_pct.png
@@ -20,9 +21,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
-from matplotlib.colors import Normalize
-from matplotlib.cm import ScalarMappable
+import matplotlib.patches as mpatches
 from scipy.sparse import coo_matrix
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
@@ -46,7 +45,7 @@ CLUSTER_CACHE = _dir / "data/processed/shelby_full_tract_cluster_map.geojson"
 def fetch_acs(year: int = 2022) -> pd.DataFrame:
     """
     Fetch ACS 5-year estimates for all Shelby County tracts.
-    Variables: race, income, poverty, unemployment.
+    Variables: race, income, poverty, unemployment, LFPR.
     """
     print(f"  Fetching ACS {year} 5-year estimates...")
     vars_needed = ",".join([
@@ -55,7 +54,8 @@ def fetch_acs(year: int = 2022) -> pd.DataFrame:
         "B19013_001E",   # median household income
         "B17001_001E",   # population for poverty determination
         "B17001_002E",   # below poverty level
-        "B23025_003E",   # civilian labor force
+        "B23025_002E",   # civilian noninstitutional population 16+ (LFPR denominator)
+        "B23025_003E",   # civilian labor force (LFPR numerator)
         "B23025_005E",   # unemployed
     ])
     r = requests.get(
@@ -67,26 +67,29 @@ def fetch_acs(year: int = 2022) -> pd.DataFrame:
     rows = r.json()
     df   = pd.DataFrame(rows[1:], columns=rows[0])
 
-    df["geoid"]     = df["state"].str.zfill(2) + df["county"].str.zfill(3) + df["tract"].str.zfill(6)
-    df["pop_total"] = pd.to_numeric(df["B02001_001E"], errors="coerce").clip(lower=0)
-    df["pop_black"] = pd.to_numeric(df["B02001_003E"], errors="coerce").clip(lower=0)
-    df["med_income"]= pd.to_numeric(df["B19013_001E"], errors="coerce")
-    df["pov_denom"] = pd.to_numeric(df["B17001_001E"], errors="coerce").clip(lower=0)
-    df["pov_below"] = pd.to_numeric(df["B17001_002E"], errors="coerce").clip(lower=0)
-    df["clf"]       = pd.to_numeric(df["B23025_003E"], errors="coerce").clip(lower=0)
-    df["unemployed"]= pd.to_numeric(df["B23025_005E"], errors="coerce").clip(lower=0)
+    df["geoid"]       = df["state"].str.zfill(2) + df["county"].str.zfill(3) + df["tract"].str.zfill(6)
+    df["pop_total"]   = pd.to_numeric(df["B02001_001E"], errors="coerce").clip(lower=0)
+    df["pop_black"]   = pd.to_numeric(df["B02001_003E"], errors="coerce").clip(lower=0)
+    df["med_income"]  = pd.to_numeric(df["B19013_001E"], errors="coerce")
+    df["pov_denom"]   = pd.to_numeric(df["B17001_001E"], errors="coerce").clip(lower=0)
+    df["pov_below"]   = pd.to_numeric(df["B17001_002E"], errors="coerce").clip(lower=0)
+    df["pop_16plus"]  = pd.to_numeric(df["B23025_002E"], errors="coerce").clip(lower=0)
+    df["clf"]         = pd.to_numeric(df["B23025_003E"], errors="coerce").clip(lower=0)
+    df["unemployed"]  = pd.to_numeric(df["B23025_005E"], errors="coerce").clip(lower=0)
 
-    df["pct_black"]  = np.where(df["pop_total"] > 0,
-                                (df["pop_black"] / df["pop_total"] * 100).clip(0, 100), np.nan)
-    df["poverty_rate"]= np.where(df["pov_denom"] > 0,
-                                 (df["pov_below"] / df["pov_denom"]).clip(0, 1), np.nan)
-    df["unemp_rate"]  = np.where(df["clf"] > 0,
-                                 (df["unemployed"] / df["clf"]).clip(0, 1), np.nan)
+    df["pct_black"]   = np.where(df["pop_total"] > 0,
+                                 (df["pop_black"] / df["pop_total"] * 100).clip(0, 100), np.nan)
+    df["poverty_rate"] = np.where(df["pov_denom"] > 0,
+                                  (df["pov_below"] / df["pov_denom"]).clip(0, 1), np.nan)
+    df["unemp_rate"]   = np.where(df["clf"] > 0,
+                                  (df["unemployed"] / df["clf"]).clip(0, 1), np.nan)
+    df["lfpr"]         = np.where(df["pop_16plus"] > 0,
+                                  (df["clf"] / df["pop_16plus"]).clip(0, 1), np.nan)
 
     print(f"  {len(df)} tracts fetched. Black % range: "
           f"{df['pct_black'].min():.1f}%-{df['pct_black'].max():.1f}%")
     return df[["geoid", "pop_total", "pop_black", "pct_black",
-               "med_income", "poverty_rate", "unemp_rate"]]
+               "med_income", "poverty_rate", "unemp_rate", "lfpr"]]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -111,10 +114,12 @@ def build_shelby_communities(shelby_gdf: gpd.GeoDataFrame,
     df = shelby_gdf[["geoid", "geometry"]].merge(acs, on="geoid", how="left").copy()
 
     # Feature matrix — flip sign so all features encode vulnerability (higher = worse)
+    # Mirrors notebook Cell 8C: economic + LFPR proxies for IGS Economy pillar
     features = pd.DataFrame({
         "neg_income":   -pd.to_numeric(df["med_income"],    errors="coerce"),
-        "poverty_rate":  pd.to_numeric(df["poverty_rate"],   errors="coerce"),
-        "unemp_rate":    pd.to_numeric(df["unemp_rate"],     errors="coerce"),
+        "poverty_rate":  pd.to_numeric(df["poverty_rate"],  errors="coerce"),
+        "unemp_rate":    pd.to_numeric(df["unemp_rate"],    errors="coerce"),
+        "neg_lfpr":     -pd.to_numeric(df["lfpr"],          errors="coerce"),
     }, index=df.index)
 
     X = SimpleImputer(strategy="median").fit_transform(features)
@@ -162,32 +167,63 @@ def select_high_growth_community(community_gdf: gpd.GeoDataFrame,
                                   acs: pd.DataFrame,
                                   low_growth_geoids: set) -> set:
     """
-    Pick the best non-overlapping community as the high-growth comparator.
-    Criteria (mirrors Cell 8F/8G): highest recovery economics (income, low poverty),
-    no more than 10% overlap with the low-growth selected community.
+    Pick the best comparator community following notebook Cells 8F/8G logic.
+
+    The pre-defined low-growth tracts may span multiple Ward clusters, so we
+    cannot require zero-overlap at the cluster level.  Instead:
+      1. Identify which Ward cluster contains the MOST low-growth tracts — that
+         cluster acts as the low-growth cluster proxy and is excluded.
+      2. From the remaining clusters (non-overlapping by Ward construction),
+         require >= 5 tracts and pop >= 10,000.
+      3. Rank by composite percentile score: income (high=good), poverty
+         (low=good), unemployment (low=good), LFPR (high=good).
     """
-    best_score  = -np.inf
-    best_geoids = set()
-
+    # Step 1: find which cluster "is" the low-growth cluster
+    overlap_counts = {}
     for community_id, grp in community_gdf.groupby("shelby_community_id"):
-        geoids  = set(grp["geoid"].dropna())
-        overlap = len(geoids & low_growth_geoids) / max(len(geoids), 1)
-        if overlap > 0.10:
-            continue   # skip communities that overlap with low-growth area
+        geoids = set(grp["geoid"].dropna())
+        overlap_counts[community_id] = len(geoids & low_growth_geoids)
 
+    low_growth_cluster = max(overlap_counts, key=overlap_counts.get)
+    print(f"  Low-growth cluster proxy: {low_growth_cluster} "
+          f"({overlap_counts[low_growth_cluster]} of 96 low-growth tracts)")
+
+    # Step 2: build eligible candidate list from all other clusters
+    rows = []
+    for community_id, grp in community_gdf.groupby("shelby_community_id"):
+        if community_id == low_growth_cluster:
+            continue
+        geoids = set(grp["geoid"].dropna())
+        if len(geoids) < 5:
+            continue
         sub = acs[acs["geoid"].isin(geoids)]
-        income  = sub["med_income"].median()
-        poverty = sub["poverty_rate"].median()
+        pop = pd.to_numeric(sub["pop_total"], errors="coerce").fillna(0).sum()
+        if pop < 10_000:
+            continue
+        rows.append({
+            "community_id": community_id,
+            "geoids":       geoids,
+            "income":       sub["med_income"].median(),
+            "poverty":      sub["poverty_rate"].median(),
+            "unemp":        sub["unemp_rate"].median(),
+            "lfpr":         sub["lfpr"].median(),
+        })
 
-        # Composite: high income + low poverty (same direction as IGS Economy pillar)
-        score = income / 1000 - poverty * 100
-        if score > best_score:
-            best_score  = score
-            best_geoids = geoids
-            best_id     = community_id
+    if not rows:
+        raise ValueError("No eligible high-growth comparator communities found.")
 
-    print(f"  High-growth comparator selected: {best_id} ({len(best_geoids)} tracts)")
-    return best_geoids
+    # Step 3: percentile-rank each dimension, take the mean
+    rank_df = pd.DataFrame(rows)
+    rank_df["r_income"]  = rank_df["income"].rank(pct=True)
+    rank_df["r_poverty"] = rank_df["poverty"].rank(pct=True, ascending=False)
+    rank_df["r_unemp"]   = rank_df["unemp"].rank(pct=True, ascending=False)
+    rank_df["r_lfpr"]    = rank_df["lfpr"].rank(pct=True)
+    rank_df["score"]     = rank_df[["r_income", "r_poverty", "r_unemp", "r_lfpr"]].mean(axis=1)
+
+    best = rank_df.loc[rank_df["score"].idxmax()]
+    print(f"  High-growth comparator selected: {best['community_id']} "
+          f"({len(best['geoids'])} tracts, score={best['score']:.3f})")
+    return best["geoids"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,15 +280,25 @@ def load_and_classify() -> gpd.GeoDataFrame:
 # Map
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_black_population_choropleth(gdf: gpd.GeoDataFrame, output_path=None):
+# Visual config per group
+_GROUP_STYLE = {
+    "low_growth":  {"fill": "#F4845A", "edge": "#B83300",
+                    "label": "Selected low-growth community"},
+    "high_growth": {"fill": "#74C476", "edge": "#1A6B1A",
+                    "label": "High-growth comparator"},
+    "rest":        {"fill": "#D9D9D9", "edge": "#999999",
+                    "label": "Rest of Shelby County"},
+}
+
+
+def plot_shelby_communities(gdf: gpd.GeoDataFrame, output_path=None):
     """
-    Choropleth of % Black by tract with community group outlines.
+    Simple 3-color categorical map: low-growth / high-growth / rest.
     Returns fig, ax. Saves to output_path if provided.
     """
-    # Per-group summary stats
     stats = {}
-    for grp in ["low_growth", "high_growth", "rest"]:
-        sub   = gdf[gdf["group"] == grp]
+    for grp in _GROUP_STYLE:
+        sub = gdf[gdf["group"] == grp]
         pop_b = pd.to_numeric(sub["pop_black"], errors="coerce").fillna(0)
         pct   = pd.to_numeric(sub["pct_black"],  errors="coerce")
         stats[grp] = {
@@ -261,92 +307,78 @@ def plot_black_population_choropleth(gdf: gpd.GeoDataFrame, output_path=None):
             "avg_pct":     float(pct.mean()),
         }
 
-    fig, ax = plt.subplots(figsize=(15, 13))
+    fig, ax = plt.subplots(figsize=(14, 12))
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    # Choropleth: % Black, Blues scale
-    norm = Normalize(vmin=0, vmax=100)
-    gdf.plot(
-        ax=ax, column="pct_black", cmap="Blues", norm=norm,
-        edgecolor="#CCCCCC", linewidth=0.35,
-        missing_kwds={"color": "#EEEEEE", "edgecolor": "#CCCCCC", "linewidth": 0.35},
-        zorder=2,
-    )
+    # Solid fill for each group — draw rest first so highlights sit on top
+    for grp in ["rest", "high_growth", "low_growth"]:
+        style = _GROUP_STYLE[grp]
+        sub   = gdf[gdf["group"] == grp]
+        if sub.empty:
+            continue
+        sub.plot(ax=ax, color=style["fill"],
+                 edgecolor="#FFFFFF", linewidth=0.25, zorder=2)
 
-    # Community outlines only — bold, no fill
-    OUTLINE = {
-        "low_growth":  {"color": "#E8500A", "linewidth": 5.0},
-        "high_growth": {"color": "#2CA02C", "linewidth": 5.0},
-    }
-    for grp, style in OUTLINE.items():
+    # Bold dissolved boundary outlines for the two named communities
+    for grp in ["high_growth", "low_growth"]:
+        style    = _GROUP_STYLE[grp]
         dissolved = gdf[gdf["group"] == grp].dissolve()
         if dissolved.empty:
             continue
         dissolved.boundary.plot(
-            ax=ax, color=style["color"], linewidth=style["linewidth"],
+            ax=ax, color=style["edge"], linewidth=3.5,
             capstyle="round", joinstyle="round", zorder=5,
         )
 
-    # Colorbar
-    sm = ScalarMappable(cmap="Blues", norm=norm)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.026, pad=0.012, shrink=0.72, aspect=22)
-    cbar.set_label("% Black residents", fontsize=13, labelpad=10)
-    cbar.set_ticks([0, 20, 40, 60, 80, 100])
-    cbar.set_ticklabels(["0%", "20%", "40%", "60%", "80%", "100%"])
-    cbar.ax.tick_params(labelsize=11)
-
-    # Legend
+    # Legend — include tract count and avg % Black in each label
+    handles = []
+    for grp, style in _GROUP_STYLE.items():
+        s = stats[grp]
+        label = (f"{style['label']}\n"
+                 f"{s['n']} tracts  |  avg {s['avg_pct']:.0f}% Black  |  "
+                 f"{s['total_black']:,} Black residents")
+        handles.append(
+            mpatches.Patch(facecolor=style["fill"],
+                           edgecolor=style["edge"], linewidth=1.5,
+                           label=label)
+        )
     ax.legend(
-        handles=[
-            mlines.Line2D([], [], color="#E8500A", linewidth=3.5,
-                          label="Selected low-growth community outline"),
-            mlines.Line2D([], [], color="#2CA02C", linewidth=3.5,
-                          label="High-growth comparator outline"),
-        ],
-        title="Community outlines", title_fontsize=12,
-        loc="upper left", fontsize=11,
-        frameon=True, framealpha=0.95, edgecolor="#AAAAAA", handlelength=2.2,
+        handles=handles,
+        loc="upper left", fontsize=10.5,
+        frameon=True, framealpha=0.95, edgecolor="#AAAAAA",
+        handlelength=1.8, handleheight=1.4,
     )
 
     # Title + subtitle
     ax.set_title(
-        "Shelby County: selected low-growth community and Black population share by tract",
-        fontsize=18, fontweight="bold", pad=16, loc="left",
+        "Shelby County: low-growth, high-growth, and the rest",
+        fontsize=17, fontweight="bold", pad=14, loc="left",
     )
     fig.text(
-        ax.get_position().x0, 0.905,
-        "Tract shading shows percent Black population using ACS tract averages for 2022-2024.",
-        fontsize=12, color="#555555", fontstyle="italic",
+        0.03, 0.935,
+        "Communities identified by spatially-constrained Ward clustering on ACS economic indicators (2022).",
+        fontsize=11, color="#555555", fontstyle="italic",
         transform=fig.transFigure,
     )
 
-    # Summary stats + story note
+    # Story note at bottom
     lg, hg, rs = stats["low_growth"], stats["high_growth"], stats["rest"]
-    summary = "\n".join([
-        "Community snapshot (ACS tract averages, 2022-2024)",
-        f"Selected low-growth community: {lg['avg_pct']:.0f}% Black | "
-        f"{lg['total_black']:,} est. Black residents | {lg['n']} tracts",
-        f"Rest of Shelby County: {rs['avg_pct']:.0f}% Black | "
-        f"{rs['total_black']:,} est. Black residents | {rs['n']} tracts",
-        f"High-growth comparator: {hg['avg_pct']:.0f}% Black | "
-        f"{hg['total_black']:,} est. Black residents | {hg['n']} tracts",
-        "",
-        "Story note",
-        (f"The selected low-growth community overlaps with the darker high-Black-share tract "
-         f"corridor: {lg['avg_pct']:.0f}% Black versus {rs['avg_pct']:.0f}% in the rest of "
-         f"Shelby County and {hg['avg_pct']:.0f}% in the high-growth comparator."),
-    ])
+    story = (
+        f"The selected low-growth community is {lg['avg_pct']:.0f}% Black, compared with "
+        f"{hg['avg_pct']:.0f}% in the high-growth comparator and "
+        f"{rs['avg_pct']:.0f}% in the rest of Shelby County."
+    )
     fig.text(
-        0.03, 0.01, summary,
-        fontsize=10, color="#333333", va="bottom",
-        bbox=dict(boxstyle="round,pad=0.7", facecolor="#F7F7F7",
+        0.03, 0.015, story,
+        fontsize=10.5, color="#333333", va="bottom",
+        wrap=True,
+        bbox=dict(boxstyle="round,pad=0.6", facecolor="#F7F7F7",
                   edgecolor="#BBBBBB", linewidth=0.9),
     )
 
     ax.set_axis_off()
-    plt.subplots_adjust(bottom=0.20, top=0.91, left=0.01, right=0.87)
+    plt.subplots_adjust(bottom=0.10, top=0.92, left=0.01, right=0.99)
 
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -354,6 +386,10 @@ def plot_black_population_choropleth(gdf: gpd.GeoDataFrame, output_path=None):
         print(f"Saved: {output_path}")
 
     return fig, ax
+
+
+def plot_black_population_choropleth(gdf, output_path=None):
+    return plot_shelby_communities(gdf, output_path=output_path)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
