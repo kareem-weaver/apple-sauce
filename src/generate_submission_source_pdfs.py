@@ -15,9 +15,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer
 
-
-ROOT = Path(__file__).resolve().parent
-OUT_DIR = ROOT / "submission_pdfs"
+from project_paths import MANIFESTS_DIR, ROOT, SOURCE_PDFS_DIR, ensure_output_dirs
 
 SOURCE_FILES = [
     ("final_model.ipynb", "final_model_source.pdf", "Final Model"),
@@ -269,26 +267,34 @@ def write_manifest(rows: list[tuple[str, str, str]], manifest_path: Path) -> Non
     manifest_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def main() -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+def build_submission_source_pdfs(output_dir: Path | None = None) -> list[Path]:
+    ensure_output_dirs()
+    output_dir = output_dir or SOURCE_PDFS_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     generated_pdfs: list[Path] = []
     for source_name, pdf_name, display_name in SOURCE_FILES:
         source_path = ROOT / source_name
         if not source_path.exists():
             raise FileNotFoundError(f"Missing source file: {source_path}")
-        output_pdf = OUT_DIR / pdf_name
+        output_pdf = output_dir / pdf_name
         build_pdf(source_path, output_pdf, display_name)
         generated_pdfs.append(output_pdf)
         print(f"Generated: {output_pdf}")
 
-    merged_path = OUT_DIR / MASTER_PDF_NAME
+    merged_path = output_dir / MASTER_PDF_NAME
     merge_pdfs(generated_pdfs, merged_path)
     print(f"Generated merged bundle: {merged_path}")
 
-    manifest_path = OUT_DIR / "README_submission_pdfs.txt"
+    manifest_path = MANIFESTS_DIR / "source_pdf_manifest.txt"
     write_manifest(SOURCE_FILES, manifest_path)
     print(f"Generated manifest: {manifest_path}")
+
+    return generated_pdfs + [merged_path]
+
+
+def main() -> None:
+    build_submission_source_pdfs()
 
 
 if __name__ == "__main__":

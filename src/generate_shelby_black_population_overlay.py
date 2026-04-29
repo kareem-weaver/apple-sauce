@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import geopandas as gpd
@@ -10,22 +11,19 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.ticker import PercentFormatter
 
-
-ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data" / "processed"
-PRESENTATION_DIR = DATA_DIR / "presentation_ready"
+from project_paths import MAPS_DIR, PRESENTATION_READY_DIR, PROCESSED_DATA_DIR
 
 CLUSTER_ID = "Tennessee | Shelby County | cluster_77"
 SHELBY_COUNTY_FIPS = "47157"
 RECOVERY_YEARS = [2022, 2023, 2024]
 
-FULL_TRACT_MAP_PATH = PRESENTATION_DIR / "shelby_full_tract_cluster_map.geojson"
-LOW_GROWTH_TRACTS_PATH = PRESENTATION_DIR / "selected_low_growth_96_tracts.geojson"
-FULL_COMPARE_PATH = PRESENTATION_DIR / "shelby_full_community_compare.csv"
-SHORTLIST_PATH = DATA_DIR / "cluster_shortlist.parquet"
-SEED_COUNTIES_PATH = DATA_DIR / "seed_counties.parquet"
-PANEL_PATH = DATA_DIR / "eda_panel_clean.parquet"
-OUTPUT_IMAGE_PATH = PRESENTATION_DIR / "shelby_black_share_choropleth.png"
+FULL_TRACT_MAP_PATH = PRESENTATION_READY_DIR / "shelby_full_tract_cluster_map.geojson"
+LOW_GROWTH_TRACTS_PATH = PRESENTATION_READY_DIR / "selected_low_growth_96_tracts.geojson"
+FULL_COMPARE_PATH = PRESENTATION_READY_DIR / "shelby_full_community_compare.csv"
+SHORTLIST_PATH = PROCESSED_DATA_DIR / "cluster_shortlist.parquet"
+SEED_COUNTIES_PATH = PROCESSED_DATA_DIR / "seed_counties.parquet"
+PANEL_PATH = PROCESSED_DATA_DIR / "eda_panel_clean.parquet"
+DEFAULT_OUTPUT_IMAGE_PATH = MAPS_DIR / "shelby_black_share_choropleth.png"
 
 GROUP_COL = "group"
 
@@ -376,14 +374,28 @@ def plot_black_population_choropleth(
     return fig, ax
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build the Shelby County Black population share choropleth."
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT_IMAGE_PATH,
+        help="Output PNG path.",
+    )
+    return parser.parse_args()
+
+
+def main(output_path: str | Path | None = None) -> None:
     cluster_row, shortlist = load_cluster_rank()
     seed_row = load_seed_county_rank()
     shelby_gdf = build_shelby_black_share_gdf()
     summary_df = summarize_groups(shelby_gdf)
-    plot_black_population_choropleth(shelby_gdf, output_path=OUTPUT_IMAGE_PATH)
+    final_output_path = Path(output_path) if output_path is not None else DEFAULT_OUTPUT_IMAGE_PATH
+    plot_black_population_choropleth(shelby_gdf, output_path=final_output_path)
 
-    print(f"Saved choropleth map: {OUTPUT_IMAGE_PATH}")
+    print(f"Saved choropleth map: {final_output_path}")
     print()
     print("Current cluster shortlist confirmation")
     print("------------------------------------")
@@ -406,4 +418,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(output_path=args.output)
