@@ -223,7 +223,6 @@ def plot_black_population_choropleth(
     output_path: str | Path | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     plot_gdf = validate_plot_columns(gdf)
-    summary_df = summarize_groups(plot_gdf)
 
     plt.rcParams.update(
         {
@@ -237,7 +236,7 @@ def plot_black_population_choropleth(
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    fig.subplots_adjust(left=0.03, right=0.86, top=0.85, bottom=0.16)
+    fig.subplots_adjust(left=0.03, right=0.84, top=0.86, bottom=0.10)
 
     choropleth = plot_gdf.plot(
         column="pct_black",
@@ -270,22 +269,29 @@ def plot_black_population_choropleth(
         boundary.boundary.plot(
             ax=ax,
             color="white",
-            linewidth=7.8,
+            linewidth=8.4,
             zorder=4,
         )
+        if row[GROUP_COL] == "Selected high-growth comparator":
+            boundary.boundary.plot(
+                ax=ax,
+                color="black",
+                linewidth=6.2,
+                zorder=5,
+            )
         boundary.boundary.plot(
             ax=ax,
             color=OUTLINE_COLORS[row[GROUP_COL]],
-            linewidth=5.2,
-            zorder=5,
+            linewidth=5.8,
+            zorder=6,
         )
 
     ax.set_axis_off()
 
     fig.suptitle(
-        "Shelby County: selected low-growth community and Black population share by tract",
+        "Shelby County Black Share",
         fontsize=24,
-        y=0.965,
+        y=0.968,
     )
     fig.text(
         0.5,
@@ -300,25 +306,25 @@ def plot_black_population_choropleth(
     norm = mpl.colors.Normalize(vmin=0, vmax=1)
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=CHOROPLETH_CMAP)
     sm.set_array([])
-    cax = fig.add_axes([0.875, 0.32, 0.02, 0.38])
+    cax = fig.add_axes([0.855, 0.29, 0.038, 0.49])
     cbar = fig.colorbar(sm, cax=cax)
-    cbar.set_label("% Black residents", fontsize=12)
+    cbar.set_label("% Black residents", fontsize=16)
     cbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
-    cbar.ax.tick_params(labelsize=11)
+    cbar.ax.tick_params(labelsize=14)
 
     outline_handles = [
         Line2D(
             [0],
             [0],
             color=OUTLINE_COLORS["Selected low-growth community"],
-            linewidth=5.2,
+            linewidth=5.8,
             label="Selected low-growth community outline",
         ),
         Line2D(
             [0],
             [0],
             color=OUTLINE_COLORS["Selected high-growth comparator"],
-            linewidth=5.2,
+            linewidth=5.8,
             label="High-growth comparator outline",
         ),
     ]
@@ -332,39 +338,10 @@ def plot_black_population_choropleth(
         facecolor="white",
         edgecolor="#d1d5db",
         framealpha=0.95,
-        fontsize=11,
-        title_fontsize=12,
+        fontsize=12,
+        title_fontsize=14,
     )
     ax.add_artist(outline_legend)
-
-    selected_row = summary_df.loc[summary_df["group"] == "Selected low-growth community"].iloc[0]
-    rest_row = summary_df.loc[summary_df["group"] == "Rest of Shelby County (excluding both selected communities)"].iloc[0]
-    high_row = summary_df.loc[summary_df["group"] == "Selected high-growth comparator"].iloc[0]
-
-    focal_text = (
-        "Story note\n"
-        f"The selected low-growth community overlaps with the darker high-Black-share tract corridor: "
-        f"{selected_row['avg_pct_black']:.0%} Black versus "
-        f"{rest_row['avg_pct_black']:.0%} in the rest of Shelby County and "
-        f"{high_row['avg_pct_black']:.0%} in the high-growth comparator."
-    )
-
-    fig.text(
-        0.055,
-        0.03,
-        build_summary_text(summary_df) + "\n\n" + focal_text,
-        ha="left",
-        va="bottom",
-        fontsize=10.3,
-        color="#1f2937",
-        bbox={
-            "boxstyle": "round,pad=0.5",
-            "facecolor": (1, 1, 1, 0.93),
-            "edgecolor": "#d1d5db",
-            "linewidth": 1.0,
-        },
-        zorder=6,
-    )
 
     if output_path is not None:
         output_path = Path(output_path)
