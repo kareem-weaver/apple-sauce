@@ -2,7 +2,7 @@
 """
 ShelbyFirst: Outcomes Data Table (standalone)
 Run:    python shelbyfirst_table_chart.py
-Output: src/data/processed/shelbyfirst_table_chart.png
+Output: outputs/submission_package/figures/charts/shelbyfirst_table_chart.png
 """
 
 import matplotlib
@@ -11,10 +11,11 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
-import os
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+
+from project_paths import CHARTS_DIR, PROCESSED_DATA_DIR
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 NAV = '#1b2a6b'
@@ -29,10 +30,11 @@ DRK = '#1a1a2e'
 SUB = '#8898cc'
 
 # ── Model-driven projections ──────────────────────────────────────────────────
-_dir  = os.path.dirname(os.path.abspath(__file__))
-_data = os.path.join(_dir, 'data', 'processed')
+CLUSTER_ID = "Tennessee | Shelby County | cluster_77"
 
-_panel  = pd.read_parquet(os.path.join(_data, 'enrichment_tract_year_panel.parquet'))
+_data = PROCESSED_DATA_DIR
+
+_panel  = pd.read_parquet(_data / 'enrichment_tract_year_panel.parquet')
 _shelby = _panel[_panel['geoid'].astype(str).str.startswith('47157')].copy()
 _shelby['income_k'] = _shelby['median_household_income'] / 1000
 
@@ -84,8 +86,8 @@ _lfpr_v = _econ(_shelby, 'lfpr_16p',    100, _PEER['labor_force'], 'labor_force'
 _pov_v  = _econ(_shelby, 'poverty_rate', 100, _PEER['poverty'],    'poverty',     -1)
 _inc_v  = _econ(_shelby, 'income_k',       1, _PEER['income'],     'income',       1)
 
-_cs   = pd.read_parquet(os.path.join(_data, 'cluster_shortlist_with_healthcare.parquet'))
-_r77  = _cs[_cs['rank'] == 11]
+_cs   = pd.read_parquet(_data / 'cluster_shortlist_with_healthcare.parquet')
+_r77  = _cs[_cs['cluster_id'].astype(str) == CLUSTER_ID]
 _ins0 = (1 - float(_r77.iloc[0]['uninsured_rate'])) * 100 \
         if len(_r77) and not pd.isna(_r77.iloc[0]['uninsured_rate']) else 82.0
 
@@ -224,8 +226,8 @@ fig.text(
 )
 
 # ── Save ──────────────────────────────────────────────────────────────────────
-out = os.path.join(_dir, 'data', 'processed', 'shelbyfirst_table_chart.png')
-os.makedirs(os.path.dirname(out), exist_ok=True)
+out = CHARTS_DIR / 'shelbyfirst_table_chart.png'
+out.parent.mkdir(parents=True, exist_ok=True)
 plt.savefig(out, dpi=130, bbox_inches='tight', facecolor=NAV, pad_inches=0.2)
 print(f'Saved: {out}')
 plt.close()

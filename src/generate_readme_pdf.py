@@ -13,11 +13,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, Preformatted, SimpleDocTemplate, Spacer
 
+from project_paths import DOCS_DIR, ROOT, ensure_output_dirs
 
-ROOT = Path(__file__).resolve().parent
 README_PATH = ROOT / "README.md"
-OUT_DIR = ROOT / "submission_pdfs"
-OUTPUT_PATH = OUT_DIR / "README_project.pdf"
+OUTPUT_PATH = DOCS_DIR / "README_project.pdf"
 
 PAGE_SIZE = letter
 LEFT_MARGIN = 0.8 * inch
@@ -318,7 +317,7 @@ def main() -> None:
     if not README_PATH.exists():
         raise FileNotFoundError(f"Missing README file: {README_PATH}")
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_output_dirs()
     build_pdf(README_PATH, OUTPUT_PATH)
     print(f"Generated: {OUTPUT_PATH}")
 
