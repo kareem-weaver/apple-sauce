@@ -80,8 +80,11 @@ This script does the following:
 1. Clears and rebuilds `outputs/submission_package`.
 2. Regenerates the core Shelby maps:
    - `shelby_black_share_choropleth.png`
+   - `shelby_internet_access_choropleth.png`
    - `shelby_map_black_pct.png`
 3. Regenerates the core ShelbyFirst charts:
+   - `shelby_internet_access_bar_chart.png`
+   - `shelby_no_internet_bar_chart.png`
    - `shelbyfirst_outcomes_chart.png`
    - `shelbyfirst_table_chart.png`
 4. Regenerates:
@@ -92,11 +95,41 @@ This script does the following:
 6. Creates PDF versions of all packaged PNG figures.
 7. Writes a JSON and text manifest for the build.
 
+### 3. Refresh Shelby internet access data when needed
+
+The Shelby internet-access choropleth now uses ACS S2801 tract data cached locally in:
+
+- `data/raw/external/acs_s2801_shelby_tract_2022_2024.parquet`
+- `data/processed/shelby_acs_internet_access_tract_2022_2024.parquet`
+
+To refresh that cache from the Census API, run:
+
+```bash
+python fetch_acs_internet_access.py
+```
+
+Then regenerate the internet map with:
+
+```bash
+python generate_shelby_internet_access_overlay.py
+```
+
 ## Standalone scripts
 
+- [fetch_acs_internet_access.py](./fetch_acs_internet_access.py)
+  - Downloads Shelby County ACS S2801 tract internet-access data for `2022`, `2023`, and `2024`.
+  - Saves a raw cache in `data/raw/external/acs_s2801_shelby_tract_2022_2024.parquet`.
+  - Saves the processed tract panel in `data/processed/shelby_acs_internet_access_tract_2022_2024.parquet`.
 - [generate_shelby_black_population_overlay.py](./generate_shelby_black_population_overlay.py)
   - Builds the main tract-level Shelby Black-share choropleth.
   - Default output: `outputs/submission_package/figures/maps/shelby_black_share_choropleth.png`
+- [generate_shelby_internet_access_overlay.py](./generate_shelby_internet_access_overlay.py)
+  - Builds the tract-level Shelby internet-subscription choropleth from the processed ACS S2801 parquet.
+  - Default output: `outputs/submission_package/figures/maps/shelby_internet_access_choropleth.png`
+- [shelby_internet_access_bar_chart.py](./shelby_internet_access_bar_chart.py)
+  - Builds the 3-group Shelby internet-access comparison charts from the same ACS S2801 tract parquet.
+  - Default output: `outputs/submission_package/figures/charts/shelby_internet_access_bar_chart.png`
+  - Alternate output with `--metric no_internet`: `outputs/submission_package/figures/charts/shelby_no_internet_bar_chart.png`
 - [shelby_map_black_pct.py](./shelby_map_black_pct.py)
   - Builds the alternate Shelby percent-Black choropleth with the same cleaned tract grouping.
   - Default output: `outputs/submission_package/figures/maps/shelby_map_black_pct.png`
@@ -118,7 +151,7 @@ This script does the following:
 
 Additional dependencies used in the workflow include:
 
-- ACS / Census API data
+- ACS / Census API data, including ACS S2801 tract internet-access tables
 - TIGER/Line tract shapefiles
 - CDC PLACES healthcare data
 - ShelbyCare scenario CSVs kept at the repo root `data/` level for notebook compatibility
@@ -147,7 +180,10 @@ python -m pip install pandas numpy pyarrow geopandas pyogrio shapely matplotlib 
 After a successful package build, the most important files are:
 
 - [outputs/submission_package/figures/maps/shelby_black_share_choropleth.png](./outputs/submission_package/figures/maps/shelby_black_share_choropleth.png)
+- [outputs/submission_package/figures/maps/shelby_internet_access_choropleth.png](./outputs/submission_package/figures/maps/shelby_internet_access_choropleth.png)
 - [outputs/submission_package/figures/maps/shelby_map_black_pct.png](./outputs/submission_package/figures/maps/shelby_map_black_pct.png)
+- [outputs/submission_package/figures/charts/shelby_internet_access_bar_chart.png](./outputs/submission_package/figures/charts/shelby_internet_access_bar_chart.png)
+- [outputs/submission_package/figures/charts/shelby_no_internet_bar_chart.png](./outputs/submission_package/figures/charts/shelby_no_internet_bar_chart.png)
 - [outputs/submission_package/figures/charts/shelbyfirst_outcomes_chart.png](./outputs/submission_package/figures/charts/shelbyfirst_outcomes_chart.png)
 - [outputs/submission_package/figures/charts/shelbyfirst_table_chart.png](./outputs/submission_package/figures/charts/shelbyfirst_table_chart.png)
 - [outputs/submission_package/docs/README_project.pdf](./outputs/submission_package/docs/README_project.pdf)
