@@ -36,9 +36,12 @@ from project_paths import (
 CORE_FIGURE_OUTPUTS = {
     "maps": [
         MAPS_DIR / "shelby_black_share_choropleth.png",
+        MAPS_DIR / "shelby_internet_access_choropleth.png",
         MAPS_DIR / "shelby_map_black_pct.png",
     ],
     "charts": [
+        CHARTS_DIR / "shelby_internet_access_bar_chart.png",
+        CHARTS_DIR / "shelby_no_internet_bar_chart.png",
         CHARTS_DIR / "shelbyfirst_outcomes_chart.png",
         CHARTS_DIR / "shelbyfirst_table_chart.png",
     ],
@@ -52,8 +55,27 @@ SCRIPT_STEPS = [
         [sys.executable, "generate_shelby_black_population_overlay.py", "--output", str(CORE_FIGURE_OUTPUTS["maps"][0])],
     ),
     (
+        "Shelby Internet Access Choropleth",
+        [sys.executable, "generate_shelby_internet_access_overlay.py", "--output", str(CORE_FIGURE_OUTPUTS["maps"][1])],
+    ),
+    (
         "Shelby Comparator Map",
-        [sys.executable, "shelby_map_black_pct.py", "--output", str(CORE_FIGURE_OUTPUTS["maps"][1])],
+        [sys.executable, "shelby_map_black_pct.py", "--output", str(CORE_FIGURE_OUTPUTS["maps"][2])],
+    ),
+    (
+        "Shelby Internet Access Bar Chart",
+        [sys.executable, "shelby_internet_access_bar_chart.py", "--output", str(CORE_FIGURE_OUTPUTS["charts"][0])],
+    ),
+    (
+        "Shelby No-Internet Bar Chart",
+        [
+            sys.executable,
+            "shelby_internet_access_bar_chart.py",
+            "--metric",
+            "no_internet",
+            "--output",
+            str(CORE_FIGURE_OUTPUTS["charts"][1]),
+        ],
     ),
     (
         "ShelbyFirst Outcomes Chart",
