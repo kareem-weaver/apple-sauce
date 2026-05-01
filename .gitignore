@@ -1,4 +1,16 @@
+# Large and local analytical data
 src/data/
-*.parquet
 src/Inclusive_Growth_Score_Data_Export_*.csv
 src/Inclusive_Growth_Score_Data_Export_*.xlsx
+*.parquet
+
+# Generated outputs and previews
+src/outputs/
+src/tmp_*.png
+
+# Python and notebook cache
+src/__pycache__/
+src/.ipynb_checkpoints/
+
+# Local working notes
+INTERNET_ACCESS_DATA_PROMPT.md

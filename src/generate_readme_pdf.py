@@ -15,7 +15,7 @@ from reportlab.platypus import Paragraph, Preformatted, SimpleDocTemplate, Space
 
 from project_paths import DOCS_DIR, ROOT, ensure_output_dirs
 
-README_PATH = ROOT / "README.md"
+README_PATH = ROOT.parent / "README.md"
 OUTPUT_PATH = DOCS_DIR / "README_project.pdf"
 
 PAGE_SIZE = letter
@@ -199,7 +199,7 @@ def draw_page_header_footer(canvas, doc) -> None:
     canvas.saveState()
     canvas.setFont(BODY_FONT, 9)
     canvas.setFillColor(colors.HexColor("#475569"))
-    canvas.drawString(LEFT_MARGIN, PAGE_SIZE[1] - 0.35 * inch, "AUC Mastercard Challenge README")
+    canvas.drawString(LEFT_MARGIN, PAGE_SIZE[1] - 0.35 * inch, "ShelbyFirst README")
     canvas.drawRightString(PAGE_SIZE[0] - RIGHT_MARGIN, 0.32 * inch, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -255,7 +255,7 @@ def build_story(readme_path: Path) -> list:
             story.append(Paragraph(format_inline_markdown(title_text), STYLES["title"]))
             story.append(
                 Paragraph(
-                    "Project scope, run order, outputs, and submission notes for the current repository state.",
+                    "Portfolio summary, analytical findings, repository structure, and reproduction notes.",
                     STYLES["subtitle"],
                 )
             )
@@ -305,7 +305,7 @@ def build_pdf(readme_path: Path, output_path: Path) -> None:
         rightMargin=RIGHT_MARGIN,
         topMargin=TOP_MARGIN,
         bottomMargin=BOTTOM_MARGIN,
-        title="AUC Mastercard Challenge README",
+        title="ShelbyFirst README",
         author="Codex",
     )
 

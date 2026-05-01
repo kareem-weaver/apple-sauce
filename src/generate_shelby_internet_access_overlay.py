@@ -10,6 +10,7 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.ticker import PercentFormatter
 
+from presentation_callouts import add_why_it_matters_callout
 from generate_shelby_black_population_overlay import (
     FULL_COMPARE_PATH,
     FULL_TRACT_MAP_PATH,
@@ -32,9 +33,29 @@ DEFAULT_YEAR = 2024
 FALLBACK_YEARS = [2024, 2023, 2022]
 
 
+def build_why_it_matters_text(plot_gdf: gpd.GeoDataFrame) -> str:
+    low_growth = plot_gdf.loc[plot_gdf[GROUP_COL] == "Selected low-growth community"].copy()
+    households = pd.to_numeric(low_growth.get("total_households"), errors="coerce").fillna(0)
+    internet_households = pd.to_numeric(
+        low_growth.get("internet_subscription_households"),
+        errors="coerce",
+    ).fillna(0)
+    share = internet_households.sum() / households.sum() if households.sum() > 0 else float("nan")
+    if pd.notna(share):
+        return (
+            f"Only {share:.1%} of households in the selected low-growth community report an "
+            "internet subscription. That means booking, alerts, and rider support cannot rely "
+            "only on digital channels."
+        )
+    return (
+        "Internet access is another place-based barrier in Shelby County, so booking, alerts, "
+        "and rider support cannot rely only on digital channels."
+    )
+
+
 def build_internet_subtitle(plot_gdf: gpd.GeoDataFrame) -> str:
     if "internet_source_year" not in plot_gdf.columns:
-        return "Tract shading shows households with an internet subscription using ACS 5-year tract estimates."
+        return "Tract shading shows household internet subscription share using ACS 5-year tract estimates."
     source_years = sorted(
         {
             int(year)
@@ -42,15 +63,15 @@ def build_internet_subtitle(plot_gdf: gpd.GeoDataFrame) -> str:
         }
     )
     if not source_years:
-        return "Tract shading shows households with an internet subscription using ACS 5-year tract estimates."
+        return "Tract shading shows household internet subscription share using ACS 5-year tract estimates."
     if len(source_years) == 1:
         year = source_years[0]
         return (
-            f"Tract shading shows households with an internet subscription using the "
+            f"Tract shading shows household internet subscription share using the "
             f"{year - 4}-{year} ACS 5-year estimates."
         )
     return (
-        "Tract shading shows households with an internet subscription using the "
+        "Tract shading shows household internet subscription share using the "
         f"{DEFAULT_YEAR - 4}-{DEFAULT_YEAR} ACS 5-year estimates, with tract-level fallback "
         "to earlier ACS releases only where needed."
     )
@@ -146,10 +167,10 @@ def plot_internet_access_choropleth(
         }
     )
 
-    fig, ax = plt.subplots(figsize=(15.5, 11))
+    fig = plt.figure(figsize=(15.5, 11), dpi=240)
+    ax = fig.add_axes([0.19, 0.14, 0.63, 0.70])
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    fig.subplots_adjust(left=0.03, right=0.86, top=0.85, bottom=0.16)
 
     plot_gdf.plot(
         column="internet_sub_share",
@@ -201,9 +222,9 @@ def plot_internet_access_choropleth(
 
     ax.set_axis_off()
     fig.suptitle(
-        "Shelby County Internet Subscription Share",
-        fontsize=24,
-        y=0.965,
+        "Shelby County Internet Access",
+        fontsize=25,
+        y=0.968,
     )
     fig.text(
         0.5,
@@ -218,11 +239,11 @@ def plot_internet_access_choropleth(
     norm = mpl.colors.Normalize(vmin=0, vmax=1)
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=CHOROPLETH_CMAP)
     sm.set_array([])
-    cax = fig.add_axes([0.865, 0.32, 0.03, 0.44])
+    cax = fig.add_axes([0.87, 0.32, 0.028, 0.45])
     cbar = fig.colorbar(sm, cax=cax)
-    cbar.set_label("% households with internet subscription", fontsize=14)
+    cbar.set_label("% households with internet subscription", fontsize=16)
     cbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
-    cbar.ax.tick_params(labelsize=13)
+    cbar.ax.tick_params(labelsize=13.5)
 
     outline_handles = [
         Line2D(
@@ -241,24 +262,37 @@ def plot_internet_access_choropleth(
         ),
     ]
 
-    outline_legend = ax.legend(
+    outline_legend = fig.legend(
         handles=outline_handles,
         title="Community outlines",
         loc="upper left",
-        bbox_to_anchor=(0.015, 0.985),
+        bbox_to_anchor=(0.055, 0.87),
+        bbox_transform=fig.transFigure,
         frameon=True,
         facecolor="white",
         edgecolor="#d1d5db",
         framealpha=0.95,
-        fontsize=11,
+        fontsize=10.7,
         title_fontsize=12,
+        handlelength=1.8,
+        borderpad=0.45,
+        labelspacing=0.5,
     )
-    ax.add_artist(outline_legend)
+    fig.add_artist(outline_legend)
+
+    add_why_it_matters_callout(
+        fig,
+        bounds=(0.055, 0.48, 0.20, 0.19),
+        body=build_why_it_matters_text(plot_gdf),
+        wrap_width=30,
+        title_fontsize=16,
+        body_fontsize=10.1,
+    )
 
     if output_path is not None:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(output_path, bbox_inches="tight", dpi=240)
+        fig.savefig(output_path, dpi=240, facecolor="white")
 
     return fig, ax
 
