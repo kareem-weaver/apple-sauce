@@ -1,72 +1,104 @@
 # ShelbyFirst: A Data-Driven Inclusive Growth Strategy for Shelby County
 
-ShelbyFirst is a portfolio project developed from a Mastercard Inclusive Growth Score (IGS) challenge submission. The work identifies a high-need community in Shelby County, Tennessee, benchmarks it against stronger peer communities, and proposes a measurable intervention built around mobility, health access, and nutrition.
+**ShelbyFirst** is a data-driven strategy proposal developed for the Mastercard Inclusive Growth Score (IGS) Challenge. The project identifies a high-need community in Shelby County, Tennessee, diagnoses overlapping health-access and economic barriers, and proposes a practical intervention built on mobility, nutrition, and care connectivity.
+
+## Challenge Overview
+
+The **Mastercard Inclusive Growth Score Challenge** asked teams to identify low-growth communities with structural economic and social barriers, explain the drivers of exclusion, and propose evidence-based interventions. ShelbyFirst ranked among the finalist submissions.
 
 ## Start Here
 
-- Pitch deck: [ShelbyFirst.pptx](./ShelbyFirst.pptx)
-- PDF version: [ShelbyFirst.pdf](./ShelbyFirst.pdf)
-- Main analysis notebook: [src/final_model2.ipynb](./src/final_model2.ipynb)
-- Submission/package builder: [src/build_submission_package.py](./src/build_submission_package.py)
+- **Presentation deck**: [ShelbyFirst.odp](./ShelbyFirst.odp)
+- **Main analysis**: [src/final_model.ipynb](./src/final_model.ipynb)
+- **Shelby deep-dive**: [src/final_model2.ipynb](./src/final_model2.ipynb)
+- **Scenario modeling**: [src/shelbyfirst_simulation.ipynb](./src/shelbyfirst_simulation.ipynb)
 
-## Executive Summary
+## The Community
 
-- Selected community: `Tennessee | Shelby County | cluster_77`
-- Current shortlist rank: `#6 of 67` shortlisted low-growth recovery clusters
-- Scale: `96` tracts and about `273K` residents in the recovery-period profile
-- Analysis periods: `2017-2019` pre-COVID, `2020-2021` COVID shock, and `2022-2024` recovery
-- Core data sources: Mastercard IGS, ACS/Census, CDC PLACES, tract geometry, and Shelby-specific healthcare/access enrichments
+- **Location**: South Memphis / Whitehaven, Shelby County, Tennessee
+- **Scale**: 96 census tracts, about 273,000 residents
+- **IGS Score**: 35.8 for the 2022-2024 recovery period
+- **Rank**: #6 of 67 shortlisted low-growth recovery clusters
+- **Focus ZIP codes**: 38109, 38116, 38117
 
-## What The Analysis Found
+### Economic Underperformance
 
-- The selected community is a large, contiguous low-growth cluster with a recovery-period IGS total of `35.8`.
-- Economic underperformance is severe relative to a high-growth Shelby comparator.
-- Median household income is about `$43.4K` versus `$119.4K`.
-- Poverty is `30.0%` versus `5.4%`.
-- Unemployment is `11.8%` versus `3.5%`.
-- Labor-force participation is `58.2%` versus `66.9%`.
-- The selected community is also far more racially concentrated.
-- Selected low-growth community: `76.8%` Black
-- Rest of Shelby County: `58.4%` Black
-- High-growth comparator: `24.6%` Black
-- Health-access stress overlaps with economic stress rather than appearing as a separate issue.
-- Uninsured adults: `15.9%` versus `7.3%`
-- Dental visit gap: `55.9%` versus `32.2%`
-- Diabetes: `21.6%` versus `11.2%`
-- Obesity: `46.2%` versus `31.5%`
-- The central analytical story is consistent across the notebook outputs and the deck.
-- Economic vulnerability, transportation friction, and care-access gaps reinforce each other and slow inclusive growth.
+| Metric | Low-IGS Shelby | High-IGS Shelby | Gap |
+|---|---:|---:|---:|
+| Median household income | $43.4K | $119.4K | -64% |
+| Poverty rate | 30.0% | 5.4% | +454% |
+| Unemployment | 11.8% | 3.5% | +237% |
+| Labor force participation | 58.2% | 66.9% | -13% |
 
-## Proposed Intervention
+### Health-Access Crisis
 
-ShelbyFirst combines three connected ideas into one operating model:
+| Outcome | Low-IGS Shelby | High-IGS Shelby | Gap |
+|---|---:|---:|---:|
+| Uninsured adults | 15.9% | 7.3% | +118% |
+| Dental visit gap | 55.6% | 32.1% | +73% |
+| Diabetes | 21.6% | 11.3% | +91% |
+| Obesity | 45.2% | 32.5% | +39% |
 
-- `Move`: lower-cost rides focused on healthcare access
-- `Nourish`: community garden and healthy food programming
-- `Connect`: referral, scheduling, and engagement support through trusted partners
+### Transportation Friction
 
-The goal is to improve inclusive growth indirectly by reducing missed care, lowering access friction, and strengthening community participation.
+Vehicle access varies sharply by ZIP code, suggesting transportation as a barrier to care:
 
-## Scenario Modeling
+- `38109` low-growth: roughly 30-45% of households with 0 or 1 vehicle
+- `38117` high-growth: roughly 15-25% of households with 0 or 1 vehicle
 
-The repo also includes a directional ShelbyCare scenario model used for pitch planning.
+## The Intervention
 
-- In the `full` scenario, modeled unemployment improves by about `0.19` percentage points.
-- Uninsured adults improve by about `0.96` percentage points.
-- Obesity improves by about `2.70` percentage points.
-- Diabetes improves by about `1.80` percentage points.
-- These are scenario-based planning estimates, not causal treatment-effect claims.
+ShelbyFirst connects three programs into one platform:
+
+- **Move**: affordable healthcare-focused rides
+- **Nourish**: community garden and nutrition support
+- **Connect**: app-driven coordination, reminders, and referrals
+
+## Implementation Roadmap
+
+### Phase 1 - Pilot
+
+- Launch in the highest-need South Memphis service area
+- Start one community garden site
+- Build referral loops with ShelbyCares and trusted providers
+
+### Phase 2 - Expand
+
+- Add more ride destinations and health-event partners
+- Expand produce distribution and awareness
+- Grow the membership base and app usage
+
+### Phase 3 - Scale
+
+- Expand across more low-IGS tracts
+- Formalize healthcare referral loops
+- Transition toward blended nonprofit sustainability
+
+## Projected Outcomes
+
+### Base-Case Scenario
+
+| Metric | Year 1 | Year 2 | Year 3 | High-IGS Baseline |
+|---|---:|---:|---:|---:|
+| IGS Score | 36.8 | 38.4 | 40.5 | 55.7 |
+| Dental visit gap | 54.4% | 52.7% | 50.7% | 32.1% |
+| Obesity | 44.8% | 44.2% | 43.5% | 32.5% |
+| Diabetes | 21.3% | 21.0% | 20.5% | 11.3% |
 
 ## Repository Contents
 
-- `ShelbyFirst.pptx` and `ShelbyFirst.pdf` contain the final presentation materials.
-- `requirements.txt` lists the Python dependencies for the public repo.
-- `src/final_model2.ipynb` is the current source of truth for the Shelby analysis and presentation-ready outputs.
-- `src/final_model.ipynb` preserves the earlier national clustering and shortlist workflow.
-- `src/shelbyfirst_simulation.ipynb` contains the scenario and simulation work.
-- `src/*.py` contains the map builders, chart scripts, data fetchers, PDF helpers, and packaging utilities.
+- `ShelbyFirst.odp` - current presentation deck
+- `src/final_model2.ipynb` - primary analysis notebook
+- `src/final_model.ipynb` - earlier national clustering and shortlist workflow
+- `src/shelbyfirst_simulation.ipynb` - scenario modeling and outcome projections
+- `src/fetch_acs_internet_access.py` - Shelby tract internet-access fetcher
+- `src/fetch_acs_vehicle_access.py` - Shelby tract vehicle-access fetcher
+- `src/generate_shelby_slidedeck_visuals.py` - slide-deck chart and map renderer
+- `src/project_paths.py` - shared path configuration
+- `src/data/` - raw and processed analytical inputs and tables
+- `src/outputs/` - generated PNGs and presentation/export artifacts
 
-## Reproducing The Project
+## How to Run
 
 1. Install dependencies:
 
@@ -74,25 +106,58 @@ The repo also includes a directional ShelbyCare scenario model used for pitch pl
 python -m pip install -r requirements.txt
 ```
 
-2. Place the required raw and processed data under `src/data/`.
-3. Rebuild the packaged deliverables:
+2. Explore the analysis:
 
-```bash
-python src/build_submission_package.py
-```
+- Open `src/final_model2.ipynb` for the Shelby-specific analysis
+- Open `src/shelbyfirst_simulation.ipynb` for outcome scenarios
 
-4. If you need to refresh Shelby tract internet access from Census ACS:
+3. Refresh data if needed:
 
 ```bash
 python src/fetch_acs_internet_access.py
+python src/fetch_acs_vehicle_access.py
 ```
 
-## What Is Intentionally Not Checked In
+4. Regenerate the slide-deck PNGs:
 
-To keep the GitHub repo focused and lightweight, the public version excludes:
+```bash
+python src/generate_shelby_slidedeck_visuals.py
+```
 
-- Large raw and processed data folders under `src/data/`
-- Generated package outputs under `src/outputs/`
-- Temporary preview images and cache directories
+- Default output folder: `src/outputs/presentation_ready/`
+- To render one asset only:
 
-The key public artifacts are the deck, the notebooks, the core scripts, and the documented analytical story.
+```bash
+python src/generate_shelby_slidedeck_visuals.py --only black-map
+```
+
+- To override the destination:
+
+```bash
+python src/generate_shelby_slidedeck_visuals.py --output-dir <path>
+```
+
+- Legacy single-purpose entrypoints remain available:
+
+```bash
+python src/generate_shelby_black_population_overlay.py
+python src/shelby_internet_access_bar_chart.py
+```
+
+5. Scenario-model exports:
+
+- `src/outputs/ml_simulation/` holds the simulation PNGs and export CSVs
+- `src/data/processed/ml_simulation/` now keeps only the processed parquet tables used for the simulation work
+
+## Notes
+
+- `src/data/processed/` is reserved for processed data inputs and analytical tables.
+- `src/outputs/` is the home for generated charts, PNGs, and presentation/export artifacts.
+- Large raw and processed data files are stored locally for reference and are not all tracked in version control.
+
+## Credits
+
+This project was developed by **Kareem Weaver** in collaboration with:
+
+- **Chace Cleveland**
+- **Santiago Soto**

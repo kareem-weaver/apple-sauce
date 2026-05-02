@@ -12,6 +12,8 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 PRESENTATION_READY_DIR = PROCESSED_DATA_DIR / "presentation_ready"
 
 OUTPUTS_DIR = ROOT / "outputs"
+PRESENTATION_READY_OUTPUT_DIR = OUTPUTS_DIR / "presentation_ready"
+ML_SIMULATION_OUTPUT_DIR = OUTPUTS_DIR / "ml_simulation"
 SUBMISSION_PACKAGE_DIR = OUTPUTS_DIR / "submission_package"
 
 FIGURES_DIR = SUBMISSION_PACKAGE_DIR / "figures"
@@ -32,6 +34,8 @@ MANIFESTS_DIR = SUBMISSION_PACKAGE_DIR / "manifests"
 def ensure_output_dirs() -> None:
     for path in [
         OUTPUTS_DIR,
+        PRESENTATION_READY_OUTPUT_DIR,
+        ML_SIMULATION_OUTPUT_DIR,
         SUBMISSION_PACKAGE_DIR,
         FIGURES_DIR,
         MAPS_DIR,
