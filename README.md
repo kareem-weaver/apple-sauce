@@ -154,10 +154,12 @@ python src/shelby_internet_access_bar_chart.py
 - `src/data/processed/` is reserved for processed data inputs and analytical tables.
 - `src/outputs/` is the home for generated charts, PNGs, and presentation/export artifacts.
 - Large raw and processed data files are stored locally for reference and are not all tracked in version control.
+- This project was AI-assisted. AI tools were used to help with coding, analysis support, documentation, and presentation asset generation, with project direction and decision-making led by the team.
 
 ## Credits
 
 This project was developed by **Kareem Weaver** in collaboration with:
 
-- **Chace Cleveland**
-- **Santiago Soto**
+- **Kareem Weaver** - Computer Science major. Led data preprocessing, final modeling, core analysis, and technical implementation.
+- **Santiago Soto** - Computer Science major. Led the machine learning work for predicted outcomes and scenario-oriented modeling.
+- **Chace Cleveland** - Business major. Led storytelling, solution development, and community outreach.
